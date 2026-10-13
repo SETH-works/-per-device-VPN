@@ -1,0 +1,25 @@
+schema_version = 1
+devices = []
+
+[[exits]]
+id = "DIRECT"
+provider = "none"
+protocol = "DIRECT"
+
+[[exits]]
+id = "VPNBOOK-US16"
+provider = "VPNBook"
+protocol = "WIREGUARD"
+verified = false
+# Use a secret-store reference only after local profiles have been inspected.
+# credential_ref = "systemd:walnuts-vpnbook-us16"
+
+[[exits]]
+id = "VPNBOOK-US178"
+provider = "VPNBook"
+protocol = "WIREGUARD"
+verified = false
+
+# No device selectors or policies are assigned until physical device identity,
+# stable selectors, and the user's desired mode are verified.
+
