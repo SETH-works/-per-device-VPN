@@ -21,6 +21,40 @@ class CredentialState(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class EvidenceStatus(StrEnum):
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    NOT_CHECKED = "NOT_CHECKED"
+
+
+@dataclass(frozen=True, slots=True)
+class PublicIPResult:
+    """Result supplied by a future probe adapter; construction performs no I/O."""
+
+    status: EvidenceStatus
+    address: str | None
+    checked_at: datetime
+    reason: str
+
+    @classmethod
+    def from_observation(cls, address: str | None, checked_at: datetime) -> "PublicIPResult":
+        if address is None:
+            return cls(EvidenceStatus.NOT_CHECKED, None, checked_at, "public_ip_not_observed")
+        if not _is_public_ipv4(address):
+            return cls(EvidenceStatus.FAILED, address, checked_at, "address_not_global_ipv4")
+        return cls(EvidenceStatus.VERIFIED, address, checked_at, "global_ipv4_observed")
+
+    def verified(self, *, now: datetime | None = None,
+                 max_age: timedelta = timedelta(minutes=10)) -> bool:
+        now = now or datetime.now(timezone.utc)
+        if self.status is not EvidenceStatus.VERIFIED or not self.address:
+            return False
+        if self.checked_at.tzinfo is None:
+            return False
+        age = now - self.checked_at.astimezone(timezone.utc)
+        return timedelta(0) <= age <= max_age and _is_public_ipv4(self.address)
+
+
 @dataclass(frozen=True, slots=True)
 class HealthEvidence:
     checked_at: datetime

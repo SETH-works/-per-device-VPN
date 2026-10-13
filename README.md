@@ -9,11 +9,13 @@ This repository currently contains a non-privileged control-plane foundation:
 - A strict, versioned TOML policy-plan loader.
 - Provider-neutral device and exit types.
 - Decision-only policy evaluation. It does not apply routes, firewall rules, DNS, or NAT.
+- Explicit, timestamped VPN-exit inventory and manual selection decisions.
+- Declarative DNS/IPv6 protection checks, structured audit records, and recovery-state assessment.
 - VPN exit selection gates requiring recent tunnel, public IPv4 egress, DNS, IPv6, and credential evidence.
 - A local `walnuts validate` command that validates plans without applying them.
 - Unit tests for fail-closed behavior, explicit selected-VPN fallback, unverified identities, and health evidence.
 
-No live host audit has been completed. No endpoint is verified, no device selector is configured, and no network policy is active. The sample plan intentionally leaves all devices unenrolled and VPN exits unverified.
+Gateway SSH access to SethLinux has been verified. Unprivileged inventory confirmed the host interfaces, default IPv4 route, DNS resolver state, Tailscale link, and existence of the `vpnbook` namespace. Privileged discovery remains pending because Gateway sudo access has not been enabled. No endpoint is verified, no device selector is configured, and no network policy is active. The sample plan intentionally leaves all devices unenrolled and VPN exits unverified.
 
 ## Local development
 
@@ -29,15 +31,9 @@ python -m walnuts.cli validate config/plan.example.toml
 
 On Linux/macOS, use `PYTHONPATH=src python3 -m unittest discover -s tests -v` and `PYTHONPATH=src python3 -m walnuts.cli validate config/plan.example.toml`.
 
-## SSH discovery prerequisite
+## Current discovery boundary
 
-The managed Gateway entry is staged but has no endpoint yet. Before assigning it, verify the SethLinux SSH host key fingerprint from its local console:
-
-```sh
-for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done
-```
-
-Provide the SHA256 fingerprint for the chosen host-key algorithm to pin the host identity during endpoint registration. The fingerprint is public and is not a credential. Complete the Gateway setup using the existing Tailscale connection under Gateway Connectivity so the host remains private; do not expose SSH to the public internet. Do not paste a private key or credentials into chat. Use the least-privileged Gateway access first; request narrowly scoped sudo only when a specific inventory command requires it.
+Use the existing private Gateway connection. Privileged inventory requires temporary sudo authorization through Gateway; never send passwords or credentials through chat. Keep all Phase 1 engine work offline until the live VPN, DNS, firewall, Docker, and router boundaries are understood.
 
 ## Safety boundary
 
