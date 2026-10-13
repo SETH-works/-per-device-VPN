@@ -34,10 +34,10 @@ On Linux/macOS, use `PYTHONPATH=src python3 -m unittest discover -s tests -v` an
 The managed Gateway entry is staged but has no endpoint yet. Before assigning it, verify the SethLinux SSH host key fingerprint from its local console:
 
 ```sh
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done
 ```
 
-Provide the SHA256 fingerprint to pin the host identity during endpoint registration. This fingerprint is public and is not a credential. Do not paste a private key or credentials into chat. Use the least-privileged Gateway access first; request narrowly scoped sudo only when a specific inventory command requires it. Keep SSH and management services off the public internet.
+Provide the SHA256 fingerprint for the chosen host-key algorithm to pin the host identity during endpoint registration. The fingerprint is public and is not a credential. Complete the Gateway setup using the existing Tailscale connection under Gateway Connectivity so the host remains private; do not expose SSH to the public internet. Do not paste a private key or credentials into chat. Use the least-privileged Gateway access first; request narrowly scoped sudo only when a specific inventory command requires it.
 
 ## Safety boundary
 
