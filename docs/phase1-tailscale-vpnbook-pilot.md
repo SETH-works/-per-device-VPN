@@ -2,7 +2,7 @@
 
 **Status: offline design only.** No route, firewall, DNS, tailnet policy, advertisement, or client setting has been changed.
 
-Use [the Phase 1 deployment change set](phase1-deployment-change-set.md) as the authoritative design and rollout plan. It records current SethLinux and PC-STREAM observations, the proposed packet path and routing/firewall objects, tailnet policy, DNS and IPv6 controls, boot persistence, checks, and rollback. The sample TOML and `walnuts pilot-plan` remain a dry-run gate and cannot apply changes.
+Use the [current operator runbook](phase1-operator-runbook.md) as the authority. Windows activation is blocked pending a validated independent underlay boundary. The [earlier deployment change set](phase1-deployment-change-set.md) retains historical server context and cannot authorize activation. The sample TOML and `walnuts pilot-plan` remain a dry-run gate and cannot apply changes.
 
 The packet path is explicit: PC-STREAM selects SethLinux as an exit node; an ingress/source-specific host rule sends only its IPv4 traffic through a dedicated veth to `vpnbook`; that namespace sends the traffic through `wg-vpn` and applies namespace-only NAT. Tailscale exit-node advertisement alone does not connect its traffic to the namespace. Exact Tailscale SNAT/forwarding rules still require privileged read-only inspection.
 

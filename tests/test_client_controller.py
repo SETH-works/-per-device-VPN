@@ -1,75 +1,67 @@
+"""Non-privileged behavioral tests; no packet-isolation claims."""
+import base64
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 
-SCRIPT = Path(__file__).parents[1] / "client" / "walnuts-client.ps1"
+ROOT = Path(__file__).parents[1]
+SCRIPT = ROOT / "client" / "walnuts-client.ps1"
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
+
+@unittest.skipUnless(POWERSHELL, "PowerShell runtime unavailable")
 class ClientControllerSafetyTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.text = SCRIPT.read_text(encoding="utf-8")
+    def test_status_reports_degraded_when_runtime_or_journal_is_unavailable(self):
+        source = SCRIPT.read_text(encoding='utf-8').replace('#requires -RunAsAdministrator', '').replace('$PSScriptRoot', '$WalnutsTestRoot')
+        with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
+            for corrupt_journal in (False, True):
+                with self.subTest(corrupt_journal=corrupt_journal):
+                    if corrupt_journal:
+                        journal = Path(directory) / 'Walnuts' / 'pc-stream-pilot.json'
+                        journal.parent.mkdir()
+                        journal.write_text('{broken', encoding='utf-8')
+                    setup = "$WalnutsTestRoot='" + str(ROOT / 'client') + "'\n$env:COMPUTERNAME='STREAM'\n"
+                    traps = '\n'.join('function ' + name + ' { throw "UNAVAILABLE" }' for name in (
+                        'Get-NetAdapter', 'Get-CimInstance', 'Set-NetFirewallProfile', 'Set-DnsClientServerAddress', 'Remove-NetFirewallRule'))
+                    command = setup + traps + '\n& {\n' + source + "\n} -Mode Status -ConfigPath '" + str(ROOT / 'client' / 'pilot-client.example.json') + "'"
+                    run = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-EncodedCommand', base64.b64encode(command.encode('utf-16le')).decode('ascii')],
+                        capture_output=True, text=True, env=dict(os.environ, ProgramData=directory), timeout=30)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertEqual(json.loads(run.stdout)['Status'], 'DEGRADED')
+                    self.assertFalse(json.loads(run.stdout)['Protected'])
 
-    def test_lockdown_precedes_dns_and_exit_node_changes(self):
-        guard = self.text.index("Add-LockdownRules $state\ntry {")
-        dns = self.text.index("Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses")
-        exit_select = self.text.index("--exit-node={0}")
-        self.assertLess(guard, dns)
-        self.assertLess(dns, exit_select)
+    def test_protection_gate_precedes_any_mutation_or_network_probe(self):
+        # Remove only the elevation directive in memory to exercise the real
+        # script without administrator privileges. Trap all effect commands.
+        source = SCRIPT.read_text(encoding="utf-8").replace(
+            "#requires -RunAsAdministrator", "").replace("$PSScriptRoot", "$WalnutsTestRoot")
+        traps = "\n".join("function " + name + ' { throw "FORBIDDEN_EFFECT" }' for name in (
+            "New-NetFirewallRule", "Set-NetFirewallProfile", "Set-DnsClientServerAddress",
+            "Remove-NetFirewallRule", "Get-NetAdapter", "Get-CimInstance", "Invoke-RestMethod",
+            "Resolve-DnsName", "Set-Content", "New-Item"))
+        with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as directory:
+            config = ROOT / "client" / "pilot-client.example.json"
+            for mode in ("Arm", "VPNBOOK", "Verify"):
+                for plan_only in (False, True):
+                    with self.subTest(mode=mode, plan_only=plan_only):
+                        setup = "$WalnutsTestRoot='" + str(ROOT / "client").replace("'", "''") + "'\n"
+                        command = setup + traps + "\n& {\n" + source + "\n} -Mode " + mode + " -ConfigPath '" + str(config) + "'" + (" -PlanOnly" if plan_only else "")
+                        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+                        run = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                            capture_output=True, text=True, env=dict(os.environ, ProgramData=directory), timeout=30)
+                        self.assertEqual(run.returncode, 2, run.stderr)
+                        result = json.loads(run.stdout)
+                        self.assertFalse(result["Protected"])
+                        self.assertFalse(result["ChangesApplied"])
+                        self.assertTrue(result["DeploymentBlocked"])
+                        self.assertEqual(result["PlannedDns"]["IPv4"], ["1.1.1.1", "8.8.8.8"])
+                        self.assertNotIn("FORBIDDEN_EFFECT", run.stderr)
+                        self.assertEqual(list(Path(directory).iterdir()), [])
 
-    def test_arm_mode_never_selects_an_exit_node(self):
-        arm = self.text.split("if ($Mode -eq 'Arm') {", 1)[1].split("  }", 1)[0]
-        self.assertNotIn("--exit-node={0}", arm)
-        self.assertIn("ARMED_BLOCKED", arm)
-
-    def test_status_does_not_capture_or_write_a_new_baseline(self):
-        status = self.text.split("if ($Mode -in @('Status','Verify')) {", 1)[1].split("$state=Save-Baseline", 1)[0]
-        self.assertIn("Show-Status", status)
-        self.assertNotIn("Save-Baseline", status)
-        self.assertNotIn("Set-", status)
-
-    def test_vpnbook_error_does_not_call_direct_or_remove_firewall(self):
-        catch = self.text.rsplit("} catch {", 1)[1].split("}\n", 1)[0]
-        self.assertNotIn("Switch-Direct", catch)
-        self.assertNotIn("Remove-NetFirewallRule", catch)
-        self.assertIn("VPNBOOK_BLOCKED", catch)
-
-    def test_kill_switch_blocks_outbound_and_ipv6(self):
-        self.assertIn("-Enabled True -DefaultOutboundAction Block", self.text)
-        self.assertIn("Block IPv6 egress", self.text)
-        self.assertIn("-Protocol IPv6", self.text)
-
-    def test_direct_requires_explicit_acknowledgement_and_restores_dhcp(self):
-        self.assertIn("-ConfirmDirect", self.text)
-        self.assertIn("-ResetServerAddresses", self.text)
-        self.assertIn("EmergencyPhrase", self.text)
-
-    def test_vpn_dns_is_bound_to_detected_tailscale_interface(self):
-        self.assertIn("TailscaleIfIndex=$adapter.ifIndex", self.text)
-        self.assertIn("Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses", self.text)
-        self.assertNotIn("InterfaceAlias $state.EthernetAlias -ServerAddresses", self.text)
-
-    def test_direct_restores_both_ethernet_and_tailscale_dns(self):
-        direct = self.text.split("function Switch-Direct", 1)[1].split("if ($PlanOnly) { Write-Warning", 1)[0]
-        self.assertIn("InterfaceAlias $state.EthernetAlias -ResetServerAddresses", direct)
-        self.assertIn("OriginalTailscaleDnsIPv4", direct)
-        self.assertIn("InterfaceIndex $state.TailscaleIfIndex -ServerAddresses $originalTailscaleDns", direct)
-        self.assertIn("InterfaceIndex $state.TailscaleIfIndex -ResetServerAddresses", direct)
-
-    def test_effective_verifier_checks_disabled_and_conflicting_rules(self):
-        assessment = self.text.split("function Test-RuleShape", 1)[1].split("function Set-ModeState", 1)[0]
-        self.assertIn("$rule.Enabled -eq 'True'", assessment)
-        self.assertIn("non_walnuts_ethernet_allow_rules", assessment)
-        self.assertIn("tailscale_transport_program_mismatch", assessment)
-        self.assertIn("dhcp_exception_scope_mismatch", assessment)
-
-    def test_status_categories_are_observation_driven(self):
-        for category in ("DIRECT", "ARMED_BLOCKED", "VPNBOOK_HEALTHY", "VPNBOOK_BLOCKED", "DEGRADED", "UNINITIALIZED"):
-            self.assertIn("'" + category + "'", self.text)
-        self.assertIn("$directOk", self.text)
-        self.assertIn("$profileMismatch", self.text)
-
-    def test_configuration_and_connectivity_verification_are_separate(self):
-        self.assertIn("ValidateSet('Status','Verify'", self.text)
-        self.assertIn("LiveConnectivityVerified", self.text)
 
 if __name__ == "__main__":
     unittest.main()

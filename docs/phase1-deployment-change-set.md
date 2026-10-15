@@ -1,5 +1,7 @@
 # Project Walnuts Phase 1 deployment change set
 
+**Superseded for Windows activation:** the controller now disables Arm/VPNBOOK/Verify because Defender rule precedence cannot establish the required underlay boundary. This document retains historical server design context. Follow the [current operator runbook](phase1-operator-runbook.md); do not execute the former client rollout from this document.
+
 **State: prepared offline; not applied.** No Tailscale exit advertisement, tailnet policy change, firewall/routing change, DNS change, or PC-STREAM mode switch has occurred. The change set below is limited to PC-STREAM. It is not cleared for execution until the privileged read-only gates are complete and the user approves this exact plan.
 
 ## Current observations
