@@ -13,6 +13,15 @@ SCRIPT = ROOT / "client" / "walnuts-client.ps1"
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
+def run_powershell(command, directory):
+    # Read test code from stdin, avoiding Windows' command-line length limit.
+    bootstrap = '& ([scriptblock]::Create([Console]::In.ReadToEnd()))'
+    encoded = base64.b64encode(bootstrap.encode('utf-16le')).decode('ascii')
+    return subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+        input=command, capture_output=True, text=True,
+        env=dict(os.environ, ProgramData=directory), timeout=30)
+
+
 @unittest.skipUnless(POWERSHELL, "PowerShell runtime unavailable")
 class ClientControllerSafetyTests(unittest.TestCase):
     def test_status_reports_degraded_when_runtime_or_journal_is_unavailable(self):
@@ -28,8 +37,7 @@ class ClientControllerSafetyTests(unittest.TestCase):
                     traps = '\n'.join('function ' + name + ' { throw "UNAVAILABLE" }' for name in (
                         'Get-NetAdapter', 'Get-CimInstance', 'Set-NetFirewallProfile', 'Set-DnsClientServerAddress', 'Remove-NetFirewallRule'))
                     command = setup + traps + '\n& {\n' + source + "\n} -Mode Status -ConfigPath '" + str(ROOT / 'client' / 'pilot-client.example.json') + "'"
-                    run = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-EncodedCommand', base64.b64encode(command.encode('utf-16le')).decode('ascii')],
-                        capture_output=True, text=True, env=dict(os.environ, ProgramData=directory), timeout=30)
+                    run = run_powershell(command, directory)
                     self.assertEqual(run.returncode, 0, run.stderr)
                     self.assertEqual(json.loads(run.stdout)['Status'], 'DEGRADED')
                     self.assertFalse(json.loads(run.stdout)['Protected'])
@@ -50,9 +58,7 @@ class ClientControllerSafetyTests(unittest.TestCase):
                     with self.subTest(mode=mode, plan_only=plan_only):
                         setup = "$WalnutsTestRoot='" + str(ROOT / "client").replace("'", "''") + "'\n"
                         command = setup + traps + "\n& {\n" + source + "\n} -Mode " + mode + " -ConfigPath '" + str(config) + "'" + (" -PlanOnly" if plan_only else "")
-                        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-                        run = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                            capture_output=True, text=True, env=dict(os.environ, ProgramData=directory), timeout=30)
+                        run = run_powershell(command, directory)
                         self.assertEqual(run.returncode, 2, run.stderr)
                         result = json.loads(run.stdout)
                         self.assertFalse(result["Protected"])

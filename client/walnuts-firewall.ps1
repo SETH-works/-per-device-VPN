@@ -154,7 +154,7 @@ function Get-WalnutsEgressAudit($Snapshot, [string]$EthernetAlias) {
   if($counts['PotentialBypass']){$issues.Add('Unresolved scopes or explicit-block transport conflicts require review.')}
   [pscustomobject]@{
     Ready=$false; Protected=$false; Enforcement='UNAVAILABLE'; CapturedUtc=[DateTime]::UtcNow.ToString('o')
-    Blockers=@('No validated independent underlay enforcement backend is installed. Arm and VPNBOOK are disabled.')+@($issues)
+    Blockers=@('The native WFP lab backend is not validated for production. PC-STREAM Arm and VPNBOOK remain disabled.')+@($issues)
     Counts=$counts; Rules=$rows; Service=$Snapshot.Service; Profiles=$profiles; Adapters=$Snapshot.Adapters
     Connections=$Snapshot.Connections; HyperV='Not modified; forwarded VM traffic and WFP layers require separate lab verification.'
     PlannedDns=[pscustomobject]@{Interface='Detected Tailscale interface';IPv4=@('1.1.1.1','8.8.8.8');AcceptTailscaleDns=$false;Ethernet='DHCP; unchanged during protection';EnforcementVerified=$false}

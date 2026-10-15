@@ -1,19 +1,35 @@
 #requires -RunAsAdministrator
 [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('Audit','Status','Verify','Arm','VPNBOOK','DIRECT','EmergencyDirect')][string]$Mode,
+  [Parameter(Mandatory=$true)][ValidateSet('BackendPlan','BackendStatus','Audit','Status','Verify','Arm','VPNBOOK','DIRECT','EmergencyDirect')][string]$Mode,
   [switch]$PlanOnly,
   [switch]$ConfirmDirect,
   [string]$EmergencyPhrase,
+  [switch]$DisposableVm,
+  [guid]$DeploymentId,
+  [string]$ServerHealthPath,
   [string]$ConfigPath = "$PSScriptRoot\pilot-client.json"
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\walnuts-firewall.ps1"
+. "$PSScriptRoot\walnuts-wfp.ps1"
 $config = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
 $stateDir = Join-Path $env:ProgramData 'Walnuts'
 $statePath = Join-Path $stateDir 'pc-stream-pilot.json'
 $group = 'Project Walnuts PC-STREAM pilot'
 $rulePrefix = 'Walnuts Pilot '
+
+if($Mode -in @('BackendPlan','BackendStatus')) {
+  $operation=if($Mode -eq 'BackendPlan'){'plan'}else{'status'}
+  Invoke-WalnutsBackend $config @($operation) | ConvertTo-Json -Depth 20
+  exit 0
+}
+if($DisposableVm) {
+  if($Mode -eq 'EmergencyDirect' -and $EmergencyPhrase -cne 'I UNDERSTAND THIS DISABLES VPN PROTECTION'){throw 'Emergency recovery requires the documented exact acknowledgement.'}
+  if(-not $PlanOnly -and -not $PSCmdlet.ShouldProcess($env:COMPUTERNAME,'Change only the explicitly identified disposable lab VM using native WFP')){exit 0}
+  Invoke-WalnutsLabMode $config $Mode $DeploymentId -PlanOnly:$PlanOnly -ConfirmDirect:$ConfirmDirect -ServerHealthPath $ServerHealthPath | ConvertTo-Json -Depth 24
+  exit 0
+}
 
 # Security gate: default Block loses to existing explicit allows; a blanket
 # Ethernet block also defeats transport allows. No tested backend exists yet.
@@ -22,7 +38,7 @@ $rulePrefix = 'Walnuts Pilot '
 if ($Mode -in @('Arm','VPNBOOK','Verify')) {
   [pscustomobject]@{Status='DEGRADED'; Protected=$false; DeploymentBlocked=$true; ChangesApplied=$false
     RequestedMode=$Mode; PlanOnly=[bool]$PlanOnly
-    Reason='Independent underlay enforcement is unavailable. Default Block plus allow exceptions cannot establish the required boundary.'
+    Reason='The native WFP lab backend is not packet-validated for production. Default Block plus allow exceptions cannot establish the required boundary.'
     PlannedDns=[pscustomobject]@{Interface='Detected Tailscale virtual interface';IPv4=@('1.1.1.1','8.8.8.8');AcceptDns=$false;Ethernet='DHCP'}} | ConvertTo-Json -Depth 6
   exit 2
 }

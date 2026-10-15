@@ -1,0 +1,9 @@
+{
+  "Version": 1,
+  "Deployment": "00000000-0000-0000-0000-000000000000",
+  "Hostname": "WALNUTS-LAB",
+  "TunnelAdapter": "00000000-0000-0000-0000-000000000000",
+  "UnderlayAdapter": "00000000-0000-0000-0000-000000000000",
+  "ServiceSha256": "***PASTEHERE***",
+  "Mode": "ARMED_BLOCKED"
+}

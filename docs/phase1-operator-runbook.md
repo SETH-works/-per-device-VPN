@@ -1,18 +1,18 @@
 # Project Walnuts Phase 1 operator runbook
 
-**Windows activation is blocked.** This release supports read-only audit, blocked dry runs and tightly gated recovery. It cannot establish the required PC-STREAM underlay boundary. Do not execute the earlier deployment sequence from commits 83f44d8 or cbe8788. Neither a clean rule inventory nor a configuration switch can enable Arm, VPNBOOK or Verify in this release.
+**Production Windows activation is blocked.** A native WFP lab backend is implemented and compiled; see the [native backend source, filter matrix, VM-only commands and packet harness](phase1-native-wfp.md). The ordinary PC-STREAM Arm/VPNBOOK/Verify gate remains closed. Only the explicit disposable-VM path can invoke native installation; no packet tests have passed. Do not execute the earlier production deployment sequence from commits 83f44d8 or cbe8788.
 
 ## Protection mechanism decision
 
 Windows Defender Firewall's explicit allows override its default outbound Block. An explicit Ethernet Block overrides conflicting transport allows regardless of their specificity. Consequently, neither the previous default-Block arrangement nor blanket-Block-plus-allow exceptions expresses this pilot's required separation while preserving unrelated rules. Program/service rules lack a general complement meaning “all applications except this service.” Enumerating every current process is not safe against newly installed processes.
 
-The implemented correction is an unconditional activation gate and an effective-policy audit. It does not introduce an enforcement backend or claim to stop traffic from a previously activated legacy client. A legacy protected journal is DEGRADED, because its actual protection cannot be established.
+The production controller retains its activation gate and effective-policy audit. A legacy protected journal is DEGRADED, because its actual protection cannot be established. The new native lab backend separately validates actual WFP objects and never treats that journal as installed filter evidence.
 
-The smallest proposed alternative is a user-mode native WFP management helper using ordinary built-in filters in a Walnuts-owned provider and sublayer. This is a design candidate requiring review and isolated Windows testing before implementation. It needs no custom kernel callout or driver. Do not silently substitute another VPN/firewall product.
+The implemented lab candidate is a user-mode native WFP management helper using ordinary built-in filters in a Walnuts-owned provider and sublayer. It requires isolated Windows testing before production activation. It has no custom kernel callout or driver.
 
 References: [Microsoft rule precedence and policy merging](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules), [WFP arbitration](https://learn.microsoft.com/en-us/windows/win32/fwp/filter-arbitration), [WFP conditions](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-condition-identifiers-), [Tailscale Windows service implementation](https://github.com/tailscale/tailscale/blob/main/cmd/tailscaled/install_windows.go).
 
-## Proposed helper contract — not implemented
+## Production acceptance contract — not yet satisfied
 
 - Validate the SCM Tailscale executable, Authenticode signature, protected installation ACLs, running process image and service identity. tailscale.exe is a CLI; the daemon is resolved from SCM rather than inferred from a filename.
 - Use a private sublayer whose higher-weight service-specific exceptions are evaluated before its lower-weight underlay block. A matching permit skips the lower block in that same sublayer; a blanket Defender block plus a Defender allow does not have that behavior. Soft permits must not override other providers' security blocks. Check hard permits, IPsec and third-party providers during arbitration review; weights alone do not prove isolation.
@@ -24,7 +24,7 @@ References: [Microsoft rule precedence and policy merging](https://learn.microso
 - Preserve host Windows management and Hyper-V configuration. Separately determine the scope of forwarded guest traffic; do not claim an Ethernet interface rule proves Hyper-V isolation. If host/guest paths cannot be separated without unwanted disruption, stop.
 - Store exact provider/sublayer/filter GUIDs, object shapes and adapter identity before mutation. Reconcile actual WFP objects, never trust only a journal. Remove only verified owned objects on explicit confirmed DIRECT.
 
-No filter weights, driver, helper service or privileged installer are shipped by this correction. The above is a bounded proposal, not a deployment-ready WFP specification.
+The helper, guard-service source and VM-only installer now exist. Exact implemented layers, weights, unresolved boot/BFE behavior and lab commands are documented in [the native WFP guide](phase1-native-wfp.md). The acceptance requirements above are not claims that those behaviors have passed packet testing.
 
 ## Read-only firewall conflict preflight
 
