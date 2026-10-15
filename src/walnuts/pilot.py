@@ -292,8 +292,8 @@ def _validate_spec(spec: PilotSpec) -> Iterable[str]:
         yield "veth IPv4 addresses must include valid prefix lengths"
     if spec.namespace != "vpnbook" or spec.tunnel_interface != "wg-vpn":
         yield "pilot namespace and tunnel must be vpnbook and wg-vpn"
-    if spec.firewall_backend != "nftables":
-        yield "this offline adapter supports nftables only; select a reviewed compatible adapter"
+    if spec.firewall_backend != "iptables-nft":
+        yield "this pilot requires the observed iptables-nft backend; do not install an independent nftables forwarding path"
     if spec.tailscale_netfilter_mode != "on":
         yield "this pilot requires verified Tailscale netfilter mode on"
     if not 1 <= spec.route_table <= 252:
@@ -312,14 +312,14 @@ def _validate_spec(spec: PilotSpec) -> Iterable[str]:
 
 def _configure_actions(spec: PilotSpec) -> tuple[str, ...]:
     return (
-        "Snapshot exact host sysctls, RPDB/routes, nftables state, Tailscale status, and protected-service checks; arm timed rollback before changes.",
+        "Snapshot exact host sysctls, RPDB/routes, iptables-nft filter/NAT state, Tailscale status, and protected-service checks; arm timed rollback before changes.",
         "Install the persistent pilot-only unreachable/firewall guards and systemd boot ordering; verify from an isolated reboot rehearsal before advertising the exit node.",
-        f"Enable only the forwarding sysctls required for the approved exit-node path, recording prior values: IPv4 and IPv6 forwarding on SethLinux.",
+        "Keep IPv6 forwarding disabled for this IPv4-only VPNBook pilot. Keep the currently enabled IPv4 forwarding value; do not change SethLinux's main/default route.",
         f"Create isolated veth pair {spec.host_veth}<->{spec.namespace_veth}; move only {spec.namespace_veth} into namespace {spec.namespace}; assign the reserved /30 addresses {spec.host_veth_ipv4} and {spec.namespace_veth_ipv4}.",
         f"In {spec.namespace}, retain the connected host-veth route and namespace default exclusively on {spec.tunnel_interface}; preserve Tailscale's host-side SNAT to {spec.host_veth_ipv4.split('/')[0]} and verify the two conntrack/NAT return stages.",
         f"Create dedicated route table {spec.route_table} defaulting to {spec.namespace_veth_ipv4.split('/')[0]} via {spec.host_veth}; add `ip rule` at priority {spec.rule_priority} matching iif tailscale0 + source {spec.client_tailscale_ipv4} to look up that table, then an unreachable fallback at {spec.rule_priority + 1}.",
-        f"Add an IPv6 unreachable policy rule at priority {spec.rule_priority} for iif tailscale0 + PC-STREAM source {spec.client_tailscale_ipv6}; create only nftables table inet {spec.firewall_table} to allow the client's IPv4 flow toward {spec.host_veth} and drop its IPv6 forwarding and any IPv4 fallback toward other interfaces.",
-        f"Inside {spec.namespace}, create only inet table {spec.namespace_firewall_table} with isolated forwarding/NAT rules: accept this pilot from {spec.namespace_veth} only to {spec.tunnel_interface}; masquerade only that IPv4 flow on {spec.tunnel_interface}; deny its other egress.",
+        f"Add an IPv4 lookup at priority {spec.rule_priority}, its unreachable fallback at {spec.rule_priority + 1}, and a PC-STREAM IPv6 unreachable rule at {spec.rule_priority}; these precede Tailscale's 5210+ rules. In iptables-nft, create only the pilot-owned {spec.firewall_table} chain and one jump at the snapshot-verified point in FORWARD that preserves Tailscale classification/SNAT and precedes the drop path; allow this client's IPv4 flow only to {spec.host_veth}, drop its IPv6 and IPv4 fallback, and RETURN unrelated traffic so existing Docker/Tailscale rules still run.",
+        f"Inside {spec.namespace}, add only pilot-owned filter/NAT chains and exact jumps after confirming the namespace ruleset: allow {spec.namespace_veth} to {spec.tunnel_interface}, allow established replies, masquerade only that IPv4 flow on {spec.tunnel_interface}, and drop any other pilot egress.",
         f"Set resolver {spec.dns_resolver_ipv4} for PC-STREAM's VPN mode and restore baseline resolver {spec.direct_dns_resolver_ipv4} for DIRECT mode; verify resolver and egress path in each mode. Do not reuse Pi-hole/upstream DNS until that path is proven safe.",
         "Only after firewall and rollback preflight: advertise SethLinux as an exit node, restrict tailnet exit-node permission to PC-STREAM, and have PC-STREAM explicitly select SethLinux with local-LAN access disabled.",
     )
@@ -331,7 +331,7 @@ def _rollback_actions(spec: PilotSpec) -> tuple[str, ...]:
         "Withdraw only the exit-node advertisement created for this pilot; leave any pre-existing Tailscale state unchanged.",
         "Remove only the pilot's persistent guard configuration and systemd unit/drop-in after client opt-out and route cleanup; retain unrelated boot configuration.",
         f"Delete only the two policy rules at priorities {spec.rule_priority} and {spec.rule_priority + 1}, the PC-STREAM IPv6 unreachable rule, and the dedicated route table {spec.route_table} entries.",
-        f"Delete only host table inet {spec.firewall_table} and namespace table inet {spec.namespace_firewall_table}; preserve all other nftables/iptables tables and chains.",
+        f"Remove only the exact pilot jump(s) and pilot-owned iptables-nft chains named {spec.firewall_table} and {spec.namespace_firewall_table}; preserve every other rule, chain, and table.",
         f"Delete host veth {spec.host_veth} (which removes its peer {spec.namespace_veth}) only after pilot route rules and advertisement are removed.",
         "Restore forwarding sysctl values from the captured snapshot only if this pilot changed them and no other approved forwarding dependency now requires them.",
         "Verify PC-STREAM DIRECT egress, original host default route, SSH/Tailscale reachability, Cloudflare, Pi-hole, Minecraft, Docker, and VPNBook baseline.",
