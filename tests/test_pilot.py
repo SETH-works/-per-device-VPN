@@ -26,7 +26,7 @@ def ready_spec() -> PilotSpec:
         namespace_veth_ipv4="169.254.254.2/30",
         route_table=198,
         rule_priority=5000,
-        firewall_backend="nftables",
+        firewall_backend="iptables-nft",
         tailscale_netfilter_mode="on",
     )
 
