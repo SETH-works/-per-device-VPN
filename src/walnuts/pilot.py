@@ -36,6 +36,8 @@ class PilotSpec:
     namespace_firewall_table: str = "walnuts_vpnbook_pilot"
     expected_vpn_ipv4: str = "147.135.15.16"
     expected_direct_ipv4: str = "198.29.53.14"
+    expected_namespace_ipv4: str = "10.104.12.196/32"
+    expected_host_default: str = "default via 192.168.1.1 dev eno1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +247,7 @@ def _validate_spec(spec: PilotSpec) -> Iterable[str]:
         ("direct DNS resolver IPv4", spec.direct_dns_resolver_ipv4),
         ("expected VPN IPv4", spec.expected_vpn_ipv4),
         ("expected direct IPv4", spec.expected_direct_ipv4),
+        ("expected namespace IPv4", spec.expected_namespace_ipv4.split("/", 1)[0]),
     ):
         try:
             ipaddress.ip_address(value)
@@ -292,6 +295,13 @@ def _validate_spec(spec: PilotSpec) -> Iterable[str]:
         yield "veth IPv4 addresses must include valid prefix lengths"
     if spec.namespace != "vpnbook" or spec.tunnel_interface != "wg-vpn":
         yield "pilot namespace and tunnel must be vpnbook and wg-vpn"
+    try:
+        if ipaddress.ip_interface(spec.expected_namespace_ipv4).version != 4:
+            yield "expected namespace tunnel address must be IPv4"
+    except ValueError:
+        yield "expected namespace tunnel address is invalid"
+    if not spec.expected_host_default.startswith("default "):
+        yield "expected host default route is invalid"
     if spec.firewall_backend != "iptables-nft":
         yield "this pilot requires the observed iptables-nft backend; do not install an independent nftables forwarding path"
     if spec.tailscale_netfilter_mode != "on":

@@ -12,9 +12,35 @@ The namespace table `inet walnuts_vpnbook_pilot` permits only the veth source th
 
 `walnuts-pilot-guard.service` recreates the host drop table on boot before `tailscaled.service`. A narrow `tailscaled.service` drop-in requires that guard to succeed before Tailscale starts. If guard installation fails at boot, Tailscale will be unavailable (LAN SSH remains the recovery path) instead of exposing a persisted exit-node advertisement through the ISP route. The guard remains installed if the namespace/tunnel is unavailable. `walnuts-pilot.service` runs the adapter after Tailscale, VPNBook, and network-online. Do not advertise the exit node unless both services and the health checks are verified. The boot rehearsal and failure behavior still require live verification.
 
-On PC-STREAM, VPNBOOK mode captures the current firewall profile actions and Tailscale DNS preference before changing anything. It adds only rules in the Walnuts group, enables Windows Firewall with outbound default Block on all profiles, allows the Tailscale interface, the Tailscale service transport, and DHCP renewal, and blocks all IPv6. It then disables Tailscale DNS acceptance, sets approved IPv4 resolvers, and selects SethLinux with LAN access disabled. Any failure after lockdown leaves outbound Block in place. There is no automatic DIRECT fallback. DIRECT requires an explicit warning and `-ConfirmDirect`; emergency recovery additionally requires the exact phrase shown below. The script never edits Hyper-V or other adapter DNS.
+On PC-STREAM, VPNBOOK mode captures the current firewall profile actions, both interfaces' DNS state, the Tailscale interface index, and Tailscale DNS preference before changing anything. It adds only rules in the Walnuts group, enables Windows Firewall with outbound default Block on all profiles, allows the Tailscale interface, the Tailscale service transport, and DHCP renewal, and blocks all IPv6. It disables Tailscale DNS acceptance and assigns the approved IPv4 resolvers to the detected Tailscale interface; Ethernet remains DHCP managed. DIRECT resets both interfaces and restores the captured Tailscale DNS preference. Any failure after lockdown leaves protection in place. There is no automatic DIRECT fallback.
 
-DNS queries and DoH from applications use the Tailscale interface while VPNBOOK is active; the physical interface has no general application allow. The Tailscale service itself is allowed to reach its control/transport endpoints over the underlay, and DHCP can renew. These are limited bootstrap/maintenance exceptions. This pilot blocks IPv6 globally on PC-STREAM while selected. It does not control other tailnet devices, physical access to SethLinux, router policies, applications using their own encrypted proxy/VPN, or host processes outside PC-STREAM. Client firewall behavior must be verified on the exact Windows build before use.
+The controller now distinguishes configuration verification (`Status`) from live connectivity verification (`Verify`). It checks rule action, direction, enabled state, profile, interface/program/service/port scope, firewall profile defaults, active adapter identity, exit-node selection, and DNS state. It also detects enabled non-Walnuts outbound allow rules that can apply to Ethernet. Such rules can override a default outbound Block and therefore make the present Windows design **deployment-blocked** until their exact live inventory is reviewed and a narrow remediation is approved. The hardening pass deliberately does not disable unrelated Windows or Hyper-V rules automatically.
+
+Application DoH is ordinary HTTPS traffic: it can use the Tailscale interface in VPNBOOK mode and is blocked in ARMED_BLOCKED when no exit route exists. The Tailscale process and DHCP remain the only intended physical-underlay exceptions. Packet capture must still prove that classic DNS and application DoH do not use Ethernet on the target Windows build.
+
+## Evidence classification
+
+### Offline verified
+
+- Python unit tests and PowerShell parser validation listed in the release handoff.
+- DNS configuration targets the detected Tailscale interface and DIRECT resets interface DNS state.
+- Status is derived from observed firewall, adapter, DNS, and Tailscale preference state rather than the journal alone.
+- Linux object reconciliation checks ownership markers and live kernel objects; stale journal state cannot report a live guard.
+- Tailscale's earlier ACCEPT does not prevent a later nftables base chain from dropping the packet; final acceptance requires the packet to survive all base chains on that hook. The actual SethLinux kernel path still needs capture.
+
+### Live observed previously; refresh before deployment
+
+- PC-STREAM: `100.70.142.17`, `fd7a:115c:a1e0::7f3b:8e11`, Ethernet `192.168.1.12`, DHCP DNS `192.168.1.1`.
+- SethLinux: `192.168.1.41`, Tailscale `100.112.153.81`, host default via `192.168.1.1 dev eno1`.
+- `vpnbook`: `wg-vpn`, `10.104.12.196/32`, IPv4 default through `wg-vpn`, resolvers `1.1.1.1` and `8.8.8.8`, VPN public IPv4 `147.135.15.16`, and no working IPv6 default path.
+
+### Not yet verified
+
+- Packet-level source before host SNAT, host-veth SNAT, namespace NAT, conntrack return translation, and counters on every expected rule.
+- Effective Windows firewall isolation in the presence of the machine's real outbound allow rules.
+- DNS egress and application DoH egress on PC-STREAM.
+- Tunnel-loss behavior, Tailscale/VPNBook restart behavior, nftables reload behavior, and boot ordering on SethLinux.
+- No isolated Linux network simulation was completed on this Windows workstation; the live read-only captures below are required.
 
 ## Deployment blockers still open
 
@@ -25,9 +51,63 @@ DNS queries and DoH from applications use the Tailscale interface while VPNBOOK 
 - Verify the namespace's persistent kill switch and the Windows Firewall rule/profile behavior. Inspect DNS queries on the exit side, not just successful resolution.
 - Review the complete tailnet policy and device tag owner; the policy fragment below is additive and cannot revoke prior broad grants. Run Tailscale's policy test against the merged policy.
 - Rehearse systemd boot/restart and interruption in an isolated Linux namespace/VM. Confirm the host nft guard survives Tailscale restarts and nftables reloads. No live reboot rehearsal has been performed.
+- Inventory every enabled PC-STREAM outbound allow rule that can apply to Ethernet. The controller now refuses to report protection while any such non-Walnuts rule exists. Approve an exact rule-by-rule remediation before Arm.
 - Refresh the example config's `[evidence]` values only after those checks. The server install command refuses to run while required evidence remains false.
 
 ## Exact staged commands (after review and separate approval)
+
+## Next read-only validation stage (no deployment approval required)
+
+Run these before any staging. Save all output with timestamps and stop if an identity or route differs.
+
+On SethLinux:
+
+```sh
+date -Is
+hostnamectl --static
+tailscale ip -4
+tailscale ip -6
+tailscale status --json
+tailscale debug prefs
+ip -4 route show default
+ip -4 rule show
+ip -6 rule show
+ip netns list
+ip -n vpnbook -4 addr show dev wg-vpn
+ip -n vpnbook -4 route show default
+ip -n vpnbook -6 route show default
+ip netns exec vpnbook wg show wg-vpn latest-handshakes
+systemctl is-active ssh tailscaled vpnbook docker nginx
+```
+
+Privileged read-only capture, using the owner's normal trusted local sudo path:
+
+```sh
+sudo iptables-save -t filter
+sudo iptables-save -t nat
+sudo ip6tables-save
+sudo nft list ruleset
+sudo ip netns exec vpnbook iptables-save -t filter
+sudo ip netns exec vpnbook iptables-save -t nat
+sudo ip netns exec vpnbook nft list ruleset
+sudo conntrack -L -p udp 2>/dev/null
+```
+
+On PC-STREAM, from elevated PowerShell:
+
+```powershell
+Get-NetAdapter | Format-Table Name,InterfaceDescription,ifIndex,Status,LinkSpeed
+Get-NetIPInterface | Sort-Object InterfaceMetric | Format-Table InterfaceAlias,AddressFamily,ConnectionState,Dhcp,InterfaceMetric
+Get-DnsClientServerAddress | Format-Table InterfaceAlias,InterfaceIndex,AddressFamily,ServerAddresses
+Get-NetFirewallProfile | Format-Table Name,Enabled,DefaultInboundAction,DefaultOutboundAction
+Get-NetFirewallRule -Enabled True -Direction Outbound -Action Allow | Select-Object Name,DisplayName,Group,Profile,PolicyStoreSourceType
+& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json
+& "$env:ProgramFiles\Tailscale\tailscale.exe" debug prefs
+.\walnuts-client.ps1 -Mode Status -ConfigPath .\pilot-client.json
+.\walnuts-client.ps1 -Mode Arm -PlanOnly -ConfigPath .\pilot-client.json
+```
+
+**Approval point:** do not run `server-guard`, install units, change tailnet policy, advertise the exit node, run `Arm`, or run `VPNBOOK` until these captures have been reviewed and every deployment blocker is closed.
 
 The following paths assume this repository is staged at `/opt/walnuts` on SethLinux and the approved runtime config is installed at `/etc/walnuts/pilot.toml`. The units use the system Python directly, so no package or venv installation is needed. The config must contain fresh observed values and reviewed `[evidence]` entries. Do not set evidence true to bypass a missing observation. Stage the source after approval with `sudo git clone https://github.com/SETH-works/-per-device-VPN.git /opt/walnuts`, then install a private config file (do not use the blocked example verbatim): `sudo install -d -m 0700 /etc/walnuts` and `sudo install -m 0600 /path/to/reviewed-pilot.toml /etc/walnuts/pilot.toml`.
 
@@ -67,7 +147,7 @@ After reviewing the plan and verifying the current client identity/interface, ar
 .\walnuts-client.ps1 -Mode Status -ConfigPath .\pilot-client.json
 ```
 
-`Arm` sets outbound default Block, IPv6 blocking, approved DNS and Tailscale DNS settings, but does not select an exit node. Confirm `KillSwitchActive: true`, an empty exit-node selection, and blocked public traffic. This intentionally leaves PC-STREAM without public internet until the route is ready.
+`Arm` sets outbound default Block, IPv6 blocking, approved DNS and Tailscale DNS settings, but does not select an exit node. Confirm `Status: ARMED_BLOCKED`, `ProtectionConfigured: true`, an empty exit-node selection, and blocked public traffic. This intentionally leaves PC-STREAM without public internet until the route is ready.
 
 ### SethLinux — install the route adapter, still before advertising
 

@@ -71,6 +71,26 @@ class ServerAdapterTests(unittest.TestCase):
             state=json.loads((Path(d)/"state.json").read_text())
             self.assertEqual(state["phase"],"GUARDED")
 
+    def test_status_rejects_stale_journal_when_live_guard_is_missing(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as d:
+            runner=RecordingRunner(); adapter=LinuxPilotAdapter(spec(),state_path=Path(d)/"state.json",runner=runner,is_root=True)
+            adapter.ensure_guard(); runner.host_table=None
+            status=adapter.status()
+            self.assertEqual(status["mode"],"DEGRADED")
+            self.assertFalse(status["guarded"])
+
+    def test_configured_values_replace_host_specific_constants(self):
+        custom=PilotSpec(client_name="PC-STREAM", client_tailscale_ipv4="100.70.142.17",
+            client_tailscale_ipv6="fd7a:115c:a1e0::7f3b:8e11", dns_resolver_ipv4="9.9.9.9",
+            direct_dns_resolver_ipv4="192.168.1.1", host_veth_ipv4="169.254.240.1/30",
+            namespace_veth_ipv4="169.254.240.2/30", route_table=198, rule_priority=4990,
+            firewall_backend="iptables-nft", tailscale_netfilter_mode="on",
+            expected_namespace_ipv4="10.0.0.9/32", expected_host_default="default via 10.0.0.1 dev eth0")
+        adapter=LinuxPilotAdapter(custom, runner=RecordingRunner(), is_root=True)
+        commands=adapter.commands()
+        self.assertTrue(any("4990" in command for command in commands))
+        self.assertTrue(any("4991" in command for command in commands))
+
     def test_failed_guard_command_records_partial_without_claiming_install(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as d:
             class Failing(RecordingRunner):

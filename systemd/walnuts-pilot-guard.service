@@ -3,6 +3,7 @@ Description=Project Walnuts PC-STREAM fail-closed guard
 After=local-fs.target nftables.service
 Before=tailscaled.service
 Wants=network-pre.target
+PartOf=tailscaled.service
 
 [Service]
 Type=oneshot

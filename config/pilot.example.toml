@@ -24,6 +24,8 @@ firewall_backend = "iptables-nft"
 tailscale_netfilter_mode = "on"
 expected_vpn_ipv4 = "147.135.15.16"
 expected_direct_ipv4 = "198.29.53.14"
+expected_namespace_ipv4 = "10.104.12.196/32"
+expected_host_default = "default via 192.168.1.1 dev eno1"
 
 [evidence]
 client_identity_confirmed = true

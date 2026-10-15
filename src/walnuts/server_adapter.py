@@ -58,8 +58,6 @@ class LinuxPilotAdapter:
     """Reconcile only state named and journaled as Walnuts-owned."""
 
     OWNER = "project-walnuts/pc-stream-vpnbook/v1"
-    ROUTE_GUARD_PREF = 5001
-    IPV6_GUARD_PREF = 5000
 
     def __init__(
         self,
@@ -164,12 +162,12 @@ class LinuxPilotAdapter:
         if not any(line.split()[0] == self.spec.namespace for line in ns.splitlines() if line.split()):
             blockers.append("vpnbook namespace is absent")
         wg_addr = read("wg_address", "ip", "-n", self.spec.namespace, "-4", "addr", "show", "dev", self.spec.tunnel_interface)
-        if "10.104.12.196/32" not in wg_addr:
+        if self.spec.expected_namespace_ipv4 not in wg_addr:
             blockers.append("vpnbook wg-vpn address differs from the approved observation")
         ns_default = read("namespace_default", "ip", "-n", self.spec.namespace, "-4", "route", "show", "default")
         if not ns_default or any("dev wg-vpn" not in line for line in ns_default.splitlines()):
             blockers.append("vpnbook IPv4 default is not exclusively through wg-vpn")
-        for resolver in ("1.1.1.1", "8.8.8.8"):
+        for resolver in (self.spec.dns_resolver_ipv4,):
             route = read(f"dns_route_{resolver}", "ip", "-n", self.spec.namespace, "-4", "route", "get", resolver)
             if "dev wg-vpn" not in route:
                 blockers.append(f"namespace DNS resolver {resolver} does not route through wg-vpn")
@@ -190,8 +188,8 @@ class LinuxPilotAdapter:
         try:
             peer_map = json.loads(tailscale_json).get("Peer", {})
             pc_stream_online = any(
-                "100.70.142.17" in peer.get("TailscaleIPs", [])
-                and "fd7a:115c:a1e0::7f3b:8e11" in peer.get("TailscaleIPs", [])
+                self.spec.client_tailscale_ipv4 in peer.get("TailscaleIPs", [])
+                and self.spec.client_tailscale_ipv6 in peer.get("TailscaleIPs", [])
                 and "STREAM" in peer.get("DNSName", "").upper()
                 and peer.get("Online") is True
                 for peer in peer_map.values()
@@ -241,7 +239,7 @@ class LinuxPilotAdapter:
             blockers.append("Tailscale preferences could not be parsed")
 
         default = read("main_default", "ip", "-4", "route", "show", "default")
-        if "default via 192.168.1.1 dev eno1" not in default:
+        if self.spec.expected_host_default not in default:
             blockers.append("SethLinux main IPv4 default route differs from the approved baseline")
         ip_forward = read("ipv4_forward", "sysctl", "-n", "net.ipv4.ip_forward")
         ipv6_forward = read("ipv6_forward", "sysctl", "-n", "net.ipv6.conf.all.forwarding")
@@ -251,22 +249,22 @@ class LinuxPilotAdapter:
         rules4 = read("rules4", "ip", "-4", "rule", "show")
         rules6 = read("rules6", "ip", "-6", "rule", "show")
         for pref, expected_name, family, address, terminal in (
-            (5000, "source_lookup", rules4, self.spec.client_tailscale_ipv4, str(self.spec.route_table)),
-            (5001, "ipv4_fallback", rules4, self.spec.client_tailscale_ipv4, "unreachable"),
+            (self.spec.rule_priority, "source_lookup", rules4, self.spec.client_tailscale_ipv4, str(self.spec.route_table)),
+            (self.spec.rule_priority + 1, "ipv4_fallback", rules4, self.spec.client_tailscale_ipv4, "unreachable"),
         ):
             lines = [line for line in family.splitlines() if line.lstrip().startswith(f"{pref}:")]
             if lines and not (expected_name in owned and any(address in line and terminal in line for line in lines)):
                 blockers.append(f"IPv4 policy priority {pref} is occupied by a non-Walnuts rule")
-        lines6 = [line for line in rules6.splitlines() if line.lstrip().startswith("5000:")]
+        lines6 = [line for line in rules6.splitlines() if line.lstrip().startswith(f"{self.spec.rule_priority}:")]
         if lines6 and not ("ipv6_block" in owned and any(self.spec.client_tailscale_ipv6 in line and "unreachable" in line for line in lines6)):
-            blockers.append("IPv6 policy priority 5000 is occupied by a non-Walnuts rule")
+            blockers.append(f"IPv6 policy priority {self.spec.rule_priority} is occupied by a non-Walnuts rule")
         table = read("route_table_198", "ip", "-4", "route", "show", "table", str(self.spec.route_table))
         expected_route = f"default via {ipaddress.ip_interface(self.spec.namespace_veth_ipv4).ip} dev {self.spec.host_veth}"
         if table and not ("host_route" in owned and all(line.strip() == expected_route for line in table.splitlines())):
             blockers.append("dedicated route table is already populated by an unexpected route")
         host_routes = read("host_routes", "ip", "-4", "route", "show", "table", "all")
         subnet = str(ipaddress.ip_interface(self.spec.host_veth_ipv4).network)
-        if subnet in host_routes:
+        if subnet in host_routes and "veth" not in owned:
             blockers.append("proposed veth subnet overlaps an existing host route")
         host_links = read("host_veth", "ip", "-j", "link", "show", "dev", self.spec.host_veth)
         ns_links = read("namespace_veth", "ip", "-n", self.spec.namespace, "-j", "link", "show", "dev", self.spec.namespace_veth)
@@ -339,8 +337,8 @@ class LinuxPilotAdapter:
         ns_ip = str(ipaddress.ip_interface(self.spec.namespace_veth_ipv4).ip)
         return (
             ("nft", "-f", "-"),
-            ("ip", "-4", "rule", "add", "pref", str(self.ROUTE_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable"),
-            ("ip", "-6", "rule", "add", "pref", str(self.IPV6_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable"),
+            ("ip", "-4", "rule", "add", "pref", str(self.spec.rule_priority + 1), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable"),
+            ("ip", "-6", "rule", "add", "pref", str(self.spec.rule_priority), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable"),
             ("ip", "link", "add", self.spec.host_veth, "type", "veth", "peer", "name", self.spec.namespace_veth),
             ("ip", "link", "set", self.spec.host_veth, "alias", f"walnuts:{instance}"),
             ("ip", "link", "set", self.spec.namespace_veth, "netns", self.spec.namespace),
@@ -371,8 +369,8 @@ class LinuxPilotAdapter:
             self._write_state(state)
             objects = [
                 ("host_nft", ("nft", "-f", "-"), self._nft_host(state["instance"])),
-                ("ipv4_fallback", ("ip", "-4", "rule", "add", "pref", str(self.ROUTE_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable"), None),
-                ("ipv6_block", ("ip", "-6", "rule", "add", "pref", str(self.IPV6_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable"), None),
+                ("ipv4_fallback", ("ip", "-4", "rule", "add", "pref", str(self.spec.rule_priority + 1), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable"), None),
+                ("ipv6_block", ("ip", "-6", "rule", "add", "pref", str(self.spec.rule_priority), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable"), None),
             ]
             try:
                 try:
@@ -396,7 +394,7 @@ class LinuxPilotAdapter:
                     elif name in {"ipv4_fallback", "ipv6_block"}:
                         family = "-4" if name == "ipv4_fallback" else "-6"
                         rules = self._run("ip", family, "rule", "show")
-                        pref = str(self.ROUTE_GUARD_PREF if name == "ipv4_fallback" else self.IPV6_GUARD_PREF) + ":"
+                        pref = str(self.spec.rule_priority + 1 if name == "ipv4_fallback" else self.spec.rule_priority) + ":"
                         matching = [line for line in rules.splitlines() if line.lstrip().startswith(pref)]
                         if matching:
                             expected = (self.spec.client_tailscale_ipv4 if name == "ipv4_fallback" else self.spec.client_tailscale_ipv6)
@@ -427,6 +425,14 @@ class LinuxPilotAdapter:
     def _object_present(self, name: str, state: dict) -> bool:
         """Return true only for an object that matches this journal's identity."""
         alias = f"walnuts:{state['instance']}"
+        if name == "host_nft":
+            try:
+                current = self._run("nft", "list", "table", "inet", self.spec.firewall_table)
+            except AdapterError:
+                return False
+            if f"{self.OWNER}; instance={state['instance']}" not in current:
+                raise AdapterError("host nftables ownership marker differs")
+            return True
         if name in {"veth", "host_alias", "host_up", "host_addr"}:
             argv = ("ip", "-j", "link", "show", "dev", self.spec.host_veth)
             try: data = json.loads(self._run(*argv))[0]
@@ -486,10 +492,8 @@ class LinuxPilotAdapter:
             raise AdapterError("server installation requires root")
         with self._locked():
             state = self._state()
-            if state and state["phase"] == "INSTALLED":
-                if state["spec_sha256"] != self._spec_hash():
-                    raise AdapterError("installed pilot does not match this config")
-                return preflight, ("already installed; no changes made",)
+            if state and state["spec_sha256"] != self._spec_hash():
+                raise AdapterError("installed pilot does not match this config")
         state = self.ensure_guard()
         # Guards are installed first and remain if any later operation fails.
         host_ip = str(ipaddress.ip_interface(self.spec.host_veth_ipv4).ip)
@@ -505,7 +509,7 @@ class LinuxPilotAdapter:
             ("ns_up", ("ip", "-n", self.spec.namespace, "link", "set", self.spec.namespace_veth, "up"), None),
             ("ns_nft", ("ip", "netns", "exec", self.spec.namespace, "nft", "-f", "-"), self._nft_namespace(state["instance"])),
             ("host_route", ("ip", "route", "add", "default", "via", ns_ip, "dev", self.spec.host_veth, "table", str(self.spec.route_table)), None),
-            ("source_lookup", ("ip", "-4", "rule", "add", "pref", "5000", "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "lookup", str(self.spec.route_table)), None),
+            ("source_lookup", ("ip", "-4", "rule", "add", "pref", str(self.spec.rule_priority), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "lookup", str(self.spec.route_table)), None),
         ]
         try:
             for name, argv, stdin in objects:
@@ -572,19 +576,23 @@ class LinuxPilotAdapter:
         client_seen = False
         try:
             peers = json.loads(peer_json).get("Peer", {}).values()
-            client_seen = any("100.70.142.17" in peer.get("TailscaleIPs", [])
+            client_seen = any(self.spec.client_tailscale_ipv4 in peer.get("TailscaleIPs", [])
                               and "STREAM" in peer.get("DNSName", "").upper() for peer in peers)
         except (json.JSONDecodeError, AttributeError):
             pass
         nft = probe("host_guard", "nft", "list", "table", "inet", self.spec.firewall_table)
         state = self._state()
-        guard_ok = bool(state and all(k in state.get("installed", []) for k in
-                                      ("host_nft", "ipv4_fallback", "ipv6_block"))
-                         and self.OWNER in nft)
+        guard_ok = False
+        if state:
+            try:
+                guard_ok = all(self._object_present(k, state) for k in
+                               ("host_nft", "ipv4_fallback", "ipv6_block"))
+            except AdapterError:
+                guard_ok = False
         healthy = (not preflight.blockers and public_ip == self.spec.expected_vpn_ipv4
                    and bool(dns_query) and not dns_query.startswith("ERROR:")
                    and "dev wg-vpn" in dns_path and ipv6.startswith("ERROR:")
-                   and "default via 192.168.1.1 dev eno1" in default
+                    and self.spec.expected_host_default in default
                    and all(protected.values())
                    and client_seen and guard_ok)
         return {"mode": "HEALTHY" if healthy else ("BLOCKED_FAIL_CLOSED" if guard_ok else "DEGRADED"),
@@ -595,9 +603,17 @@ class LinuxPilotAdapter:
     def status(self) -> dict:
         state = self._state()
         preflight = self.preflight()
+        guard_ok = False
+        if state:
+            try:
+                guard_ok = all(self._object_present(k, state) for k in
+                               ("host_nft", "ipv4_fallback", "ipv6_block"))
+            except AdapterError:
+                guard_ok = False
         return {
-            "mode": "UNINITIALIZED" if state is None else state["phase"],
-            "guarded": bool(state and "host_nft" in state.get("installed", [])),
+            "mode": "UNINITIALIZED" if state is None else (state["phase"] if guard_ok else "DEGRADED"),
+            "recorded_phase": None if state is None else state["phase"],
+            "guarded": guard_ok,
             "preflight_blockers": list(preflight.blockers),
             "observed": preflight.observed,
             "exit_node_advertised_by_adapter": False,
@@ -631,9 +647,9 @@ class LinuxPilotAdapter:
                 if "host_nft" in owned:
                     self._delete_owned_nft(None, self.spec.firewall_table, state["instance"])
                 if "ipv4_fallback" in owned:
-                    self._run("ip", "-4", "rule", "del", "pref", str(self.ROUTE_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable")
+                    self._run("ip", "-4", "rule", "del", "pref", str(self.spec.rule_priority + 1), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv4}/32", "unreachable")
                 if "ipv6_block" in owned:
-                    self._run("ip", "-6", "rule", "del", "pref", str(self.IPV6_GUARD_PREF), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable")
+                    self._run("ip", "-6", "rule", "del", "pref", str(self.spec.rule_priority), "iif", "tailscale0", "from", f"{self.spec.client_tailscale_ipv6}/128", "unreachable")
                 state["phase"] = "REMOVED"
                 self._write_state(state)
             except Exception:
