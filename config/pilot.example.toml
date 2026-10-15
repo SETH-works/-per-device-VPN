@@ -1,0 +1,47 @@
+# Deliberately incomplete: `walnuts pilot-plan config/pilot.example.toml`
+# must block until every live identity, route, firewall, DNS, and health fact
+# has been observed and reviewed. This file cannot apply system changes.
+[pilot]
+client_name = "PC-STREAM"
+client_tailscale_ipv4 = ""
+client_tailscale_ipv6 = ""
+dns_resolver_ipv4 = ""
+direct_dns_resolver_ipv4 = ""
+host_veth_ipv4 = ""
+namespace_veth_ipv4 = ""
+route_table = 198
+rule_priority = 5000
+namespace = "vpnbook"
+tunnel_interface = "wg-vpn"
+host_veth = "wlnh0"
+namespace_veth = "wlnn0"
+firewall_table = "walnuts_pilot"
+namespace_firewall_table = "walnuts_vpnbook_pilot"
+firewall_backend = "nftables"
+tailscale_netfilter_mode = "on"
+expected_vpn_ipv4 = "147.135.15.16"
+expected_direct_ipv4 = "198.29.53.14"
+
+[evidence]
+client_identity_confirmed = false
+only_client_granted_exit_node_access = false
+forwarding_baseline_recorded = false
+host_forwarding_values_known = false
+namespace_default_via_tunnel_confirmed = false
+namespace_kill_switch_confirmed = false
+tailscale_source_pre_snat_confirmed = false
+tailscale_snat_to_veth_confirmed = false
+dns_resolver_reachable_only_via_tunnel = false
+ipv6_drop_path_verified = false
+firewall_backend_and_tailscale_mode_verified = false
+nft_table_name_available = false
+namespace_nft_table_name_available = false
+route_table_available = false
+rule_priority_available = false
+veth_addresses_available = false
+existing_forwarding_dependencies_reviewed = false
+boot_guard_persistence_verified = false
+ssh_and_protected_services_baselined = false
+wg_handshake_recent = false
+vpn_ipv4_verified = false
+direct_ipv4_verified = false

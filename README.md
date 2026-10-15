@@ -12,10 +12,11 @@ This repository currently contains a non-privileged control-plane foundation:
 - Explicit, timestamped VPN-exit inventory and manual selection decisions.
 - Declarative DNS/IPv6 protection checks, structured audit records, and recovery-state assessment.
 - VPN exit selection gates requiring recent tunnel, public IPv4 egress, DNS, IPv6, and credential evidence.
+- A single-device Tailscale-to-VPNBook pilot planner with strict prerequisites, health checks, a dry-run-only CLI, and scoped rollback steps. The planner does not execute host or tailnet changes.
 - A local `walnuts validate` command that validates plans without applying them.
 - Unit tests for fail-closed behavior, explicit selected-VPN fallback, unverified identities, and health evidence.
 
-Gateway SSH access to SethLinux has been verified. Unprivileged inventory confirmed the host interfaces, default IPv4 route, DNS resolver state, Tailscale link, and existence of the `vpnbook` namespace. Privileged discovery remains pending because Gateway sudo access has not been enabled. No endpoint is verified, no device selector is configured, and no network policy is active. The sample plan intentionally leaves all devices unenrolled and VPN exits unverified.
+Gateway SSH access to SethLinux has been verified for unprivileged read-only discovery. Gateway sudo diagnostics found that `/usr/bin/sudo` resolves to the Ubuntu `sudo-rs` provider under `/usr/lib/cargo/bin`, which Gateway currently rejects as outside a trusted executable path; no sudo or system file was changed. Read-only inventory confirmed the host IPv4 default route, Tailscale policy routing, and `vpnbook` namespace existence. Namespace internals, effective firewall rules, Docker workload inventory, router details, and device identities remain unverified. The pilot records `147.135.15.16` and `198.29.53.14` as user-supplied expected egress values; tunnel-path, DNS, and IPv6 health checks remain required before selection. The example policy leaves all devices unenrolled and VPN exits unverified. See `docs/phase1-tailscale-vpnbook-pilot.md`.
 
 ## Local development
 
@@ -27,13 +28,16 @@ From the repository root:
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 python -m walnuts.cli validate config/plan.example.toml
+python -m walnuts.cli pilot-plan config/pilot.example.toml
 ```
+
+`pilot-plan` is a planning-only command. The example intentionally reports blockers. It never applies network changes.
 
 On Linux/macOS, use `PYTHONPATH=src python3 -m unittest discover -s tests -v` and `PYTHONPATH=src python3 -m walnuts.cli validate config/plan.example.toml`.
 
 ## Current discovery boundary
 
-Use the existing private Gateway connection. Privileged inventory requires temporary sudo authorization through Gateway; never send passwords or credentials through chat. Keep all Phase 1 engine work offline until the live VPN, DNS, firewall, Docker, and router boundaries are understood.
+Use the existing private Gateway connection. Continue read-only inventory through the existing access path. Gateway sudo compatibility with the installed sudo-rs trusted path remains unresolved; do not replace sudo, alter alternatives, or modify privileged files as a workaround. Keep the pilot offline until the VPN, DNS, firewall, Docker, and tailnet policy boundaries are understood.
 
 ## Safety boundary
 
