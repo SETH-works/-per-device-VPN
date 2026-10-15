@@ -1,0 +1,17 @@
+[Unit]
+Description=Project Walnuts PC-STREAM VPNBook routing adapter
+Requires=walnuts-pilot-guard.service vpnbook.service tailscaled.service
+After=walnuts-pilot-guard.service vpnbook.service tailscaled.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/walnuts
+Environment=PYTHONPATH=/opt/walnuts/src
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -m walnuts.cli server-install --apply /etc/walnuts/pilot.toml
+ExecReload=/usr/bin/python3 -m walnuts.cli server-install --apply /etc/walnuts/pilot.toml
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

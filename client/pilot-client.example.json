@@ -1,0 +1,10 @@
+{
+  "ClientHostname": "STREAM",
+  "EthernetAlias": "Ethernet",
+  "LanIPv4": "192.168.1.12",
+  "GatewayIPv4": "192.168.1.1",
+  "ClientTailscaleIPv4": "100.70.142.17",
+  "ClientTailscaleIPv6": "fd7a:115c:a1e0::7f3b:8e11",
+  "ExitNodeIPv4": "100.112.153.81",
+  "DnsIPv4": ["1.1.1.1", "8.8.8.8"]
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Project Walnuts PC-STREAM fail-closed guard
+After=local-fs.target nftables.service
+Before=tailscaled.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/walnuts
+Environment=PYTHONPATH=/opt/walnuts/src
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -m walnuts.cli server-guard /etc/walnuts/pilot.toml
+ExecReload=/usr/bin/python3 -m walnuts.cli server-guard /etc/walnuts/pilot.toml
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

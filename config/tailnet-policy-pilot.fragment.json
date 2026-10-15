@@ -1,0 +1,34 @@
+{
+  "tagOwners": {
+    "tag:pc-stream-vpnbook-pilot": [
+      "autogroup:admin"
+    ]
+  },
+  "grants": [
+    {
+      "src": [
+        "tag:pc-stream-vpnbook-pilot"
+      ],
+      "dst": [
+        "autogroup:internet"
+      ],
+      "ip": [
+        "*"
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "src": "100.70.142.17",
+      "accept": [
+        "1.1.1.1:53"
+      ]
+    },
+    {
+      "src": "100.70.142.18",
+      "deny": [
+        "1.1.1.1:53"
+      ]
+    }
+  ]
+}

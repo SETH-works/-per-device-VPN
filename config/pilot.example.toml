@@ -9,7 +9,7 @@ dns_resolver_ipv4 = "1.1.1.1"
 # Second previously observed VPNBook namespace resolver: 8.8.8.8.
 # The namespace address 10.104.12.196/32 and wg-vpn/default route are also
 # prior observations; refresh before deployment.
-direct_dns_resolver_ipv4 = ""
+direct_dns_resolver_ipv4 = "192.168.1.1"
 host_veth_ipv4 = "169.254.240.1/30"
 namespace_veth_ipv4 = "169.254.240.2/30"
 route_table = 198
